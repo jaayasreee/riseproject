@@ -1,0 +1,27 @@
+// $Id: init.hoc,v 1.21 2010/10/09 21:30:03 samn Exp $
+
+print "Loading init.hoc..."
+
+{xwindows=1}
+{show_panel=0}
+{load_file("xgetargs.hoc")}
+{load_file("grvec.hoc")}
+{load_file("syncode.hoc")}
+{load_file("decnqs.hoc")}
+install_vecst()
+install_stats()
+/*{install_PLACE()}*/
+/*{install_sampen()}*/
+/*{install_updown()}*/
+/*{install_myfft()} // just for debugging*/
+transpose_clust=0
+{load_file("intfsw.hoc")}
+{load_file("drline.hoc")}
+{load_file("stats.hoc")}
+{load_file("infot.hoc")}
+{load_file("decmat.hoc")}
+{load_file("staley.hoc")}
+{load_file("updown.hoc")}
+{load_file("filtutils.hoc")}
+{load_file("col.hoc")}
+verbose_INTF6=verbose_infot=0

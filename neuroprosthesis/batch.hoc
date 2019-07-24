@@ -1,0 +1,164 @@
+// Run this file to run intfcol
+// Version: 2011aug26 by cliffk
+
+// Load files
+{xopen("setup.hoc")
+xopen("nrnoc.hoc")
+xopen("init.hoc")
+xopen("nqsnet.hoc")
+xopen("network.hoc")}
+
+// Define things
+objref pop1, pop2 // For the cell populations receiving input and damage/prosthesis
+ncellpops=1 // Number of populations to recieve input and damage/prosthesis
+pop1=new Vector(3)
+pop2=new Vector(3)
+if(c_or_t==1) {
+	pop1.x[0]=E4
+	pop1.x[1]=I4
+	pop1.x[2]=I4L
+	pop2.x[0]=E2
+	pop2.x[1]=I2
+	pop2.x[2]=I2L}
+if(c_or_t==2) {
+	pop1.x[0]=E4
+	pop1.x[1]=I4
+	pop1.x[2]=I4L
+	pop2.x[0]=E4
+	pop2.x[1]=I4
+	pop2.x[2]=I4L}
+if(c_or_t==1) proswt=6.7 // Weight for cortex
+if(c_or_t==2) proswt=7.1 // Weight for thalamus
+
+// Continue loading files
+{xopen("params.hoc")
+xopen("run.hoc")
+xopen("nload.hoc")}
+
+objref sig1, sig2, signal, cellpop // Initialize signal
+if (freq>0) {
+	print "Creating stimulus..."
+	// Read in stimulus from file
+	ropen("ratlfp.dat") // Open file for reading
+	veclen=mytstop/1000*freq // Number of elements required
+	filesize=363818 // Number of lines in the file. Stupid? Yes.
+	sig1 = new Vector(filesize) // Create new signal. Sigh. Stupidly there's no way to automatically load an entire text file.
+	for i=0,filesize-1 sig1.x[i] = fscan() // Get one number from the file
+	ropen() // Close the input file
+	
+	// Downsample
+	objref p
+	p = new PythonObject()
+	nrnpython("import pyhoc")
+	origrate=4000 // 4 kHz
+	npts=origrate*mytstop/1000 // Number of elements of the original to use
+	sig2=new Vector(npts) // Initialize semifinal signal
+	for i=0,npts-1 sig2.x[i]=sig1.x[i] // Copy vector
+	signal=p.pyhoc.downsample(sig2,origrate,freq) // Finally, compute final vector
+	signal.add(-signal.min()) // Make minimum zero
+	signal.div(signal.max()*1.1) // Make maximum 90%
+	signal.add(0.05) // Add 5% to make bounds [5%,95%]
+	
+	// Add stimulus
+	xopen("flexinput.hoc")
+	cellpop=new Vector() // Which populations will get stimulated
+	for i=0,ncellpops-1 cellpop.append(pop1.x[i]) // Ditto
+	whichsy=AM2 // Which synapses to stimulate
+	timei=0 // Time to start the stimulus
+	timef=mytstop // Time to stop the stimulus
+	poisadd(signal,timei,timef,freq,cellpop,sigprct,sigwt,whichsy) // Add stimulus
+	print "...done."
+	}
+
+// Add a fake stimulus -- code doesn't work otherwise
+for i=0,numcols-1 for j=0,ncellpops-1 for case(&x,pop1.x[j]) for case (&y,AM2) {
+        wshock[i][x][y] = 0.001 // Something very small -- needs to exist or else the Poisson stim doesn't work
+      durshock[i][x][y] = 1
+     prctshock[i][x][y] = 100 // Shock everything, but weights are so low it doesn't matter
+        nshock[i][x][y] = 1
+      isishock[i][x][y] = 100
+    startshock[i][x][y] = 1000
+  }
+  
+// Add a prosthesis
+isi=10 // Shock ISI in ms -- 1000/isi is the frequency in Hz
+if(b_d_p==3) {
+	for i=0,numcols-1 for j=0,ncellpops-1 for case(&x,pop2.x[j]) for case (&y,AM2) {
+	        wshock[i][x][y] = proswt
+	      durshock[i][x][y] = 1 // Instantaneous shock
+	     prctshock[i][x][y] = 100 // Shock all cells in that population
+	        nshock[i][x][y] = mytstop/isi // Calculate the number of shocks
+	      isishock[i][x][y] = isi // Interstimulus interval
+	    startshock[i][x][y] = 1000 // Offset to show change
+	  }
+  }
+setshock(0) // If no argument, it resets the stimulus I believe...
+
+// For saving LFP results
+run() // Run the sim
+print "Saving LFP..."
+oldhz=nqLFP.cob.v.size/tstop*1000 // Original sampling rate; *1000 because tstop is in ms
+newhz=200 // The new frequency to sample at, in Hz
+ratio=oldhz/newhz // Calculate the ratio betwen the old and new sampling rates
+npts=tstop/1000*newhz // Number of points in the resampled time seris
+nlayers=nqLFP.m // Number of layers (usually 5 -- 2/3, 4, 5, 6, all)
+objref tempvec // Temporary place to store NQS column as a vector
+objref tempstr // Name of the NQS column being selected
+objref storelfp // Create matrix to store results in
+storelfp = new Matrix(npts, nlayers*numcols) // Combine layers/columns into one dimension
+count=0 // Set column of storelfp to zero
+for i=0,numcols-1 { // Loop over all columns
+  for j=0,nlayers-1 { // Loop over all layers
+    tempstr=nqLFP[i].s[j] // Get this particular NQS column header
+    tempvec=nqLFP[i].getcol(tempstr.s) // Save this particular NQS column to a vector
+    for k=0,npts-1 { // Loop over points in the resampled time series
+      // Calculate this particular data point by downsampling and store
+      storelfp.x[k][count]=tempvec.mean(k*ratio,(k+1)*ratio-1) 
+    }
+    count+=1 // Increase column of storelfp
+  }
+}
+
+// For outputting LFPs to a file
+objref fobj
+fobj = new File(outfn1)
+fobj.wopen()
+storelfp.fprint(fobj,"%10.1f") // It's usually in the thousands so one d.p. should do
+fobj.close()
+
+// For saving spike results
+print "Saving spikes..."
+skipsnq=0 // flag to create NQS with spike times, one per column
+initAllMyNQs() // setup of NQS objects with spike/other information
+objref storespikes, tmpt, tmpid, tmptype, tmpcol // Initialize vectors and matrices -- the tmp vectors are for storing parts of the NQS arrays
+totalnumberofspikes=0 // Calculate the total number of spikes generated across all columns
+for i=0,numcols-1 totalnumberofspikes+=snq[i].cob.v.size 
+storespikes = new Matrix(totalnumberofspikes, 4) // Four columns: spike time, cell ID, cell type, and spike time
+count=-1 // Initialize row count
+for i=0,numcols-1 { // Loop over columns
+	tmpt=snq[i].getcol("t")
+	tmpid=snq[i].getcol("id")
+	tmptype=snq[i].getcol("type")
+	tmpcol=snq[i].getcol("col")
+	for j=0,snq[i].cob.v.size-1 { // Loop over spikes
+		if (mod(tmpid.x[j],scale)==0) { // Only collect spikes from one out of every "scale" cells
+			count+=1
+			if (mod(count,100000)==0) {print count*100/snq[i].cob.v.size} // Print progress
+			storespikes.x[count][0]=tmpt.x[j] // Store spike times
+			storespikes.x[count][1]=tmpid.x[j] // Store cell number
+			storespikes.x[count][2]=tmptype.x[j] // Store cell type
+			storespikes.x[count][3]=tmpcol.x[j] // Store column number
+		}
+	}
+}
+storespikes.resize(count,4) // Get rid of extra zeros
+
+// For outputting spikes to a file
+objref fobj2
+fobj2 = new File(outfn2)
+fobj2.wopen()
+storespikes.fprint(fobj2,"%6.0f") // All quantities are integers, so this should be fine
+fobj2.close()
+
+
+print "batch.hoc: done"

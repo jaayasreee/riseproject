@@ -1,0 +1,7 @@
+load_file("nrngui.hoc")
+xpanel("Please read the README")
+  xlabel("This simulation will NOT run under auto-launch.  It is designed to run with")
+  xlabel("Python, Pylab, SciPy, NumPy, and Matplotlib under linux.")
+  xlabel("See the README for details on how to run")
+  xbutton("Quit","quit()")
+xpanel()

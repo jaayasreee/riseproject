@@ -1,0 +1,73 @@
+#!/bin/bash
+# This program runs the neuroprosthesis model.
+#
+# For more information, please contact Cliff Kerr on
+# cliffk@neurosim.downstate.edu
+# 
+# Version: 2011sep28
+
+
+# User-configurable options
+cort_or_thal=1 # cortical (1) or thalamic (2) damage/prosthesis 
+modelsize=1 # Sets the number of cells in the model. The paper used modelsize=10, but this takes up a lot of RAM and is quite slow.
+simduration=20e3 # How many ms to run the model for. The paper used simulationtime=90e3, but this is also quite slow.
+basefilename="neuropros" # Choose the base name of the files to output
+
+tic=`date +%s` # Get current time, to check how long the simulation takes
+
+
+# Save sim data
+## First, input arguments
+echo "~~~~~INPUT ARGUMENTS~~~~~" > $basefilename-sim.txt; echo "runsim $*" >> $basefilename-sim.txt # Save input arguments
+for i in 1 2 3 4 5; do echo "" >> $basefilename-sim.txt; done # Make space
+## Next, this file
+echo "~~~~~RUNSIM~~~~~" >> $basefilename-sim.txt; cat runsim >> $basefilename-sim.txt # Save this file
+for i in 1 2 3 4 5; do echo "" >> $basefilename-sim.txt; done # Make space
+## All hoc files
+for file in *.hoc
+	do echo "~~~~~${file}~~~~~" >> $basefilename-sim.txt # Save this file
+	cat $file >> $basefilename-sim.txt # Save all hoc files 
+	for i in 1 2 3 4 5; do echo "" >> $basefilename-sim.txt; done # Make space
+done
+## All mod files
+for file in *.mod
+	do echo "~~~~~${file}~~~~~" >> $basefilename-sim.txt # Save this file
+	cat $file >> $basefilename-sim.txt # Save all mod files 
+	for i in 1 2 3 4 5; do echo "" >> $basefilename-sim.txt; done # Make space
+done
+
+# Figure out where the executable is living
+if [ -f ./i686/special ]; then executable="./i686/special"; fi
+if [ -f ./x86_64/special ]; then executable="./x86_64/special"; fi
+
+if [ $executable ] # Only run if the executable is found!
+	then
+	for b_d_p in 1 2 3 # Loop over baseline (1), damage (2), and prosthesis (3) cases
+		do
+		
+		# This line is what actually runs the model!!
+		$executable -c "mytstop=$simduration" -c "strdef outfn1, outfn2" -c "outfn1=\"$basefilename$b_d_p-lfp.txt\"" -c "outfn2=\"$basefilename$b_d_p-spk.txt\"" -c "c_or_t=$cort_or_thal" -c "b_d_p=$b_d_p" -c "freq=20" -c "sigprct=80" -c "sigwt=20" -c "scale=$modelsize" batch.hoc 
+		
+		# Remove the stupid row/column info at the top of the matrix
+		if [ -f $basefilename$b_d_p-spk.txt ] # Output files exist -- good
+			then
+			echo 'Removing empty first row...'
+			sed -i 1d $basefilename$b_d_p-spk.txt
+			sed -i 1d $basefilename$b_d_p-lfp.txt
+		else
+			echo 'Simulation aborted!' # Output files don't exist -- bad
+		fi
+	
+	done
+
+else
+	echo "Executable not found! Please find 'special' manually."
+fi
+
+elapsed=$(( `date +%s` - tic )) # Find out elapsed time
+echo "runsim: done; elapsed time: $elapsed s."
+echo ""
+echo "Performing analysis..."
+
+python comparerasters.py & # Create Fig. 4/6 from the paper
+python comparecausality.py & # Create Fig. 5/7 from the paper
